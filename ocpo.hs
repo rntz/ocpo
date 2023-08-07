@@ -7,14 +7,19 @@ data Type a where
 
 type Semilattice a = Type a -- for now all types are semilattices
 
--- Expressions. TODO: sum type inj & case.
+-- Expressions.
 type Var a = (Type a, String)
 data Expr a where
   EVal :: Val a -> Expr a -- escape hatch for primitives
   ENat :: Int -> Expr Int
+  -- variables & functions
   EVar :: Var a -> Expr a
   ELam :: Var a -> Expr b -> Expr (a -> b)
   EApp :: Expr (a -> b) -> Expr a -> Expr b
+  -- sums
+  EInj :: Either (Expr a) (Expr b) -> Expr (Either a b)
+  ECase :: Type c -> Expr (Either a b) -> (Var a, Expr c) -> (Var b, Expr c) -> Expr c
+  -- semilattices & fixed points
   ELub :: Semilattice a -> [Expr a] -> Expr a
   EFix :: Var a -> Expr a -> Expr a
 
@@ -54,14 +59,27 @@ eval env (ENat x) = xs where xs = x : xs
 eval env (EVar x) = binding x env
 eval env (ELam x body) = \v -> eval (Bind x v : env) body
 eval env (EApp func arg) = eval env func $ eval env arg
+eval env (EInj (Left  e)) = Now $ Left  $ eval env e
+eval env (EInj (Right e)) = Now $ Right $ eval env e
+eval env (ECase ctp subj (x,left) (y,right)) = examine $ eval env subj
+  where examine (Now (Left v))  = eval (Bind x v : env) left
+        examine (Now (Right v)) = eval (Bind y v : env) right
+        examine (Later q)       = delay ctp $ examine q
 eval env (ELub tp es) = lub tp $ map (eval env) es
--- The magic trick.
 eval env (EFix x@(xtp, xname) body) = result
   where result = eval (Bind x (delay xtp result) : env) body
 
-delayMap :: Type b -> (a -> Val b) -> Eventual a -> Val b
-delayMap tp f (Now x)   = f x
-delayMap tp f (Later x) = delay tp (delayMap tp f x)
+-- The rope trick.
+delay :: Type a -> Val a -> Val a
+delay TNat       = (0 :)
+delay (TFun a b) = (delay b .)
+delay TSum{}     = Later
+
+-- Eventual is, like, the initial Delay-algebra or something?
+-- a monad-but-stronger-elimination rule, like Set elimination in Datafun
+eventually :: Type b -> (a -> Val b) -> Eventual a -> Val b
+eventually tp f (Now x)   = f x
+eventually tp f (Later x) = delay tp (eventually tp f x)
 
 -- Type-indexed operations.
 lub :: Semilattice a -> [Val a] -> Val a
@@ -78,18 +96,13 @@ lub (TSum a b) xs = foldr combine infty xs
         -- or risk non-productivity. So we use `delay`. Fingers crossed.
         combine (Later x) (Now y) =
           Now $ case y of
-                     Left z  -> Left  $ lub a [z, delay a (delayMap a fromLeft x)]
-                     Right z -> Right $ lub b [z, delay b (delayMap b fromRight x)]
+                     Left z  -> Left  $ lub a [z, delay a (eventually a fromLeft x)]
+                     Right z -> Right $ lub b [z, delay b (eventually b fromRight x)]
           where fromLeft  (Left  q) = q
                 fromLeft  (Right _) = error "Left/Right conflict"
                 fromRight (Right q) = q
                 fromRight (Left  _) = error "Left/Right conflict"
         combine x@Now{} y@Later{} = combine y x
-
-delay :: Type a -> Val a -> Val a
-delay TNat xs = 0 : xs
-delay (TFun a b) f = \x -> delay b (f x)
-delay (TSum a b) x = Later x
 
 
 -- BUT WHAT DOES IT __DO__???
