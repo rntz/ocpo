@@ -3,6 +3,7 @@
 data Type a where
   TNat :: Type Int
   TSum :: Type a -> Type b -> Type (Either a b)
+  TPair :: Type a -> Type b -> Type (a, b)
   TFun :: Type a -> Type b -> Type (a -> b)
 
 type Semilattice a = Type a -- for now all types are semilattices
@@ -16,6 +17,10 @@ data Expr a where
   EVar :: Var a -> Expr a
   ELam :: Var a -> Expr b -> Expr (a -> b)
   EApp :: Expr (a -> b) -> Expr a -> Expr b
+  -- pairs
+  EPair :: Expr a -> Expr b -> Expr (a,b)
+  EPi1 :: Expr (a,b) -> Expr a
+  EPi2 :: Expr (a,b) -> Expr b
   -- sums
   EInj :: Either (Expr a) (Expr b) -> Expr (Either a b)
   ECase :: Type c -> Expr (Either a b) -> (Var a, Expr c) -> (Var b, Expr c) -> Expr c
@@ -30,6 +35,7 @@ data Eventual a = Now a | Later (Eventual a) deriving (Show)
 type family Val a where
   Val Int = Stream Int
   Val (Either a b) = Eventual (Either (Val a) (Val b))
+  Val (a, b) = (Val a, Val b)
   Val (a -> b) = Val a -> Val b
 
 -- Are two types the same?
@@ -38,9 +44,11 @@ same :: Type a -> Type b -> Maybe (Same a b)
 same TNat TNat = Just Refl
 same (TFun a b) (TFun a' b') | Just Refl <- same a a', Just Refl <- same b b' = Just Refl
 same (TSum a b) (TSum a' b') | Just Refl <- same a a', Just Refl <- same b b' = Just Refl
+same (TPair a b) (TPair a' b') | Just Refl <- same a a', Just Refl <- same b b' = Just Refl
 same TNat _ = Nothing
 same TFun{} _ = Nothing
 same TSum{} _ = Nothing
+same TPair{} _ = Nothing
 
 -- Environments bind vars to vals
 data Binding where Bind :: Var a -> Val a -> Binding
@@ -59,21 +67,29 @@ eval env (ENat x) = xs where xs = x : xs
 eval env (EVar x) = binding x env
 eval env (ELam x body) = \v -> eval (Bind x v : env) body
 eval env (EApp func arg) = eval env func $ eval env arg
+-- pairs
+eval env (EPair e1 e2) = (eval env e1, eval env e2)
+eval env (EPi1 e) = fst $ eval env e
+eval env (EPi2 e) = snd $ eval env e
+-- sums
 eval env (EInj (Left  e)) = Now $ Left  $ eval env e
 eval env (EInj (Right e)) = Now $ Right $ eval env e
 eval env (ECase ctp subj (x,left) (y,right)) = examine $ eval env subj
   where examine (Now (Left v))  = eval (Bind x v : env) left
         examine (Now (Right v)) = eval (Bind y v : env) right
         examine (Later q)       = delay ctp $ examine q
+-- lub & fix
 eval env (ELub tp es) = lub tp $ map (eval env) es
 eval env (EFix x@(xtp, xname) body) = result
   where result = eval (Bind x (delay xtp result) : env) body
 
 -- The rope trick.
+-- NB. DO NOT FORCE THUNKS! NO PATTERN MATCHING!
 delay :: Type a -> Val a -> Val a
-delay TNat       = (0 :)
-delay (TFun a b) = (delay b .)
-delay TSum{}     = Later
+delay TNat        = (0 :)
+delay (TPair a b) = \x -> (delay a (fst x), delay b (snd x))
+delay (TFun a b)  = (delay b .)
+delay TSum{}      = Later
 
 -- Eventual is, like, the initial Delay-algebra or something?
 -- a monad-but-stronger-elimination rule, like Set elimination in Datafun
@@ -85,6 +101,7 @@ eventually tp f (Later x) = delay tp (eventually tp f x)
 lub :: Semilattice a -> [Val a] -> Val a
 lub TNat xss = maximum (0 : map head xss) : lub TNat (map tail xss)
 lub (TFun a b) fs = \x -> lub b [f x | f <- fs]
+lub (TPair a b) xys = (lub a (map fst xys), lub b (map snd xys))
 lub (TSum a b) xs = foldr combine infty xs
   where infty = Later infty
         combine (Now (Left x))  (Now (Left y))  = Now . Left  $ lub a [x, y]
@@ -137,4 +154,5 @@ omega2 = EApp (EFix f $ ELam x $ EApp plusOne $ EApp (EVar f) (EVar x))
         x = (TNat, "x")
 
 -- TODO: tests for ELub (esp. at function & sum type)
+-- TODO: tests for pair types
 -- TODO: tests for sum types
