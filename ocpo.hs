@@ -1,7 +1,4 @@
 {-# LANGUAGE GADTs, TypeFamilies #-}
-import Data.Maybe (catMaybes)
-import Data.Either (partitionEithers)
-
 -- TODO: pair types
 data Type a where
   TNat :: Type Int
