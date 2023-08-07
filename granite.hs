@@ -1,5 +1,6 @@
 {-# LANGUAGE GADTs, TypeFamilies #-}
 import Data.Maybe (catMaybes)
+import Data.Either (partitionEithers)
 
 -- TODO: pair types
 data Type a where
@@ -9,7 +10,7 @@ data Type a where
 
 type Semilattice a = Type a -- for now all types are semilattices
 
--- Expressions.
+-- Expressions. TODO: sum type inj & case.
 type Var a = (Type a, String)
 data Expr a where
   EVal :: Val a -> Expr a -- escape hatch for primitives
@@ -22,9 +23,11 @@ data Expr a where
 
 -- Values
 type Stream a = [a] -- monotonically increasing infinite streams
+data Eventual a = Now a | Later (Eventual a) deriving (Show)
+
 type family Val a where
   Val Int = Stream Int
-  Val (Either a b) = Maybe (Either (Val a) (Val b))
+  Val (Either a b) = Eventual (Either (Val a) (Val b))
   Val (a -> b) = Val a -> Val b
 
 -- Are two types the same?
@@ -59,26 +62,39 @@ eval env (ELub tp es) = lub tp $ map (eval env) es
 eval env (EFix x@(xtp, xname) body) = result
   where result = eval (Bind x (delay xtp result) : env) body
 
+delayMap :: Type b -> (a -> Val b) -> Eventual a -> Val b
+delayMap tp f (Now x)   = f x
+delayMap tp f (Later x) = delay tp (delayMap tp f x)
+
 -- Type-indexed operations.
 lub :: Semilattice a -> [Val a] -> Val a
 lub TNat xss = maximum (0 : map head xss) : lub TNat (map tail xss)
 lub (TFun a b) fs = \x -> lub b [f x | f <- fs]
-lub (TSum a b) xs =
-  case catMaybes xs of
-    [] -> Nothing
-    (Left x : xs)  -> Just $ Left  $ lub a (x : map fromLeft xs)
-    (Right x : xs) -> Just $ Right $ lub b (x : map fromRight xs)
-
-fromLeft (Left x) = x
-fromLeft _ = error "expected Left, got Right"
-fromRight (Right x) = x
-fromRight _ = error "expected Right, got Left"
+lub (TSum a b) xs = foldr combine infty xs
+  where infty = Later infty
+        combine (Now (Left x))  (Now (Left y))  = Now . Left  $ lub a [x, y]
+        combine (Now (Right x)) (Now (Right y)) = Now . Right $ lub b [x, y]
+        combine Now{} Now{} = error "Left/Right conflict"
+        combine (Later x) (Later y) = Later $ combine x y
+        -- For Later x/Now y combination, we must lub the eventual result of x with y, and
+        -- in particular detect Left/Right collisions. But we cannot do this _immediately_
+        -- or risk non-productivity. So we use `delay`. Fingers crossed.
+        combine (Later x) (Now y) =
+          Now $ case y of
+                     Left z  -> Left  $ lub a [z, delay a (delayMap a fromLeft x)]
+                     Right z -> Right $ lub b [z, delay b (delayMap b fromRight x)]
+          where fromLeft  (Left  q) = q
+                fromLeft  (Right _) = error "Left/Right conflict"
+                fromRight (Right q) = q
+                fromRight (Left  _) = error "Left/Right conflict"
+        combine x@Now{} y@Later{} = combine y x
 
 delay :: Type a -> Val a -> Val a
 delay TNat xs = 0 : xs
 delay (TFun a b) f = \x -> delay b (f x)
-delay (TSum a b) _ = Nothing -- UH OH THIS SEEMS WRONG
+delay (TSum a b) x = Later x
 
+
 -- BUT WHAT DOES IT __DO__???
 
 ex :: Int -> Env -> Expr Int -> [Int]
@@ -110,4 +126,5 @@ omega2 = EApp (EFix f $ ELam x $ EApp plusOne $ EApp (EVar f) (EVar x))
   where f = (TFun TNat TNat, "f")
         x = (TNat, "x")
 
--- TODO: tests for ELub (esp. at function type)
+-- TODO: tests for ELub (esp. at function & sum type)
+-- TODO: tests for sum types
