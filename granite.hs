@@ -1,7 +1,7 @@
 {-# LANGUAGE GADTs, TypeFamilies #-}
 import Data.Maybe (catMaybes)
 
--- TODO: pair & sum types
+-- TODO: pair types
 data Type a where
   TNat :: Type Int
   TSum :: Type a -> Type b -> Type (Either a b)
@@ -9,7 +9,7 @@ data Type a where
 
 type Semilattice a = Type a -- for now all types are semilattices
 
--- Expressions. TODO: semilattice join.
+-- Expressions.
 type Var a = (Type a, String)
 data Expr a where
   EVal :: Val a -> Expr a -- escape hatch for primitives
@@ -66,8 +66,13 @@ lub (TFun a b) fs = \x -> lub b [f x | f <- fs]
 lub (TSum a b) xs =
   case catMaybes xs of
     [] -> Nothing
-    (Left x : xs) -> undefined
-    (Right x : xs) -> undefined
+    (Left x : xs)  -> Just $ Left  $ lub a (x : map fromLeft xs)
+    (Right x : xs) -> Just $ Right $ lub b (x : map fromRight xs)
+
+fromLeft (Left x) = x
+fromLeft _ = error "expected Left, got Right"
+fromRight (Right x) = x
+fromRight _ = error "expected Right, got Left"
 
 delay :: Type a -> Val a -> Val a
 delay TNat xs = 0 : xs
