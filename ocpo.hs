@@ -105,10 +105,10 @@ lub (TSum a b) xs = foldr combine infty xs
   where infty = Later infty
         combine (Later x) (Later y) = Later $ combine x y
         combine x@Later{} y@Now{} = combine y x -- always put Now first
-        combine (Now (Left x)) y = Now . Left $ lub a [x, delay a (eventually a fromLeft y)]
+        combine (Now (Left x)) y = Now . Left $ lub a [x, eventually a fromLeft y]
           where fromLeft  (Left  q) = q
                 fromLeft  (Right _) = error "Left/Right conflict"
-        combine (Now (Right x)) y = Now . Right $ lub b [x, delay b (eventually b fromRight y)]
+        combine (Now (Right x)) y = Now . Right $ lub b [x, eventually b fromRight y]
           where fromRight (Right q) = q
                 fromRight (Left  _) = error "Right/Left conflict"
 
