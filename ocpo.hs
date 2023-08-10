@@ -1,5 +1,4 @@
 {-# LANGUAGE GADTs, TypeFamilies #-}
--- TODO: pair types
 data Type a where
   TNat :: Type Int
   TSum :: Type a -> Type b -> Type (Either a b)
@@ -124,8 +123,8 @@ lub (TSum a b) xs = foldr combine infty xs
 
 -- BUT WHAT DOES IT __DO__???
 
-ex :: Int -> Env -> Expr Int -> [Int]
-ex n env e = take n $ eval env e
+ex :: Int -> Expr Int -> [Int]
+ex n e = take n $ eval [] e
 
 -- TODO:
 -- f left = {0} union {x+1 for x in f right}
@@ -153,6 +152,20 @@ omega2 = EApp (EFix f $ ELam x $ EApp plusOne $ EApp (EVar f) (EVar x))
   where f = (TFun TNat TNat, "f")
         x = (TNat, "x")
 
--- TODO: tests for ELub (esp. at function & sum type)
+at :: Int -> Expr (Int -> a) -> Expr a
+at n = flip EApp (ENat n)
+
+-- Tests for ELub (TODO: at sum type)
+-- f = (\x -> f (x + 1)) join (\x -> 4)
+funjoin :: Expr Int
+funjoin = at 3 $ EFix f $ ELub ftp [ ELam x (EApp ef (EApp plusOne ex))
+                                   , ELam x (ENat 4) ]
+  where ftp = TFun TNat TNat
+        f = (ftp, "f"); x = (TNat, "x")
+        ef = EVar f; ex = EVar x
+
+sumjoin :: Expr Int
+sumjoin = undefined
+
 -- TODO: tests for pair types
 -- TODO: tests for sum types
