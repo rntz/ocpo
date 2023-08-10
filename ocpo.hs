@@ -1,9 +1,9 @@
 {-# LANGUAGE GADTs, TypeFamilies, ScopedTypeVariables #-}
 data Type a where
-  TNat :: Type Int
-  TSum :: Type a -> Type b -> Type (Either a b)
-  TPair :: Type a -> Type b -> Type (a, b)
-  TFun :: Type a -> Type b -> Type (a -> b)
+  Nat :: Type Int
+  Sum :: Type a -> Type b -> Type (Either a b)
+  Pair :: Type a -> Type b -> Type (a, b)
+  Fun :: Type a -> Type b -> Type (a -> b)
 
 type Semilattice a = Type a -- for now all types are semilattices
 
@@ -40,14 +40,14 @@ type family Val a where
 -- Are two types the same?
 data Same a b where Refl :: Same a a
 same :: Type a -> Type b -> Maybe (Same a b)
-same TNat TNat = Just Refl
-same (TFun a b) (TFun a' b') | Just Refl <- same a a', Just Refl <- same b b' = Just Refl
-same (TSum a b) (TSum a' b') | Just Refl <- same a a', Just Refl <- same b b' = Just Refl
-same (TPair a b) (TPair a' b') | Just Refl <- same a a', Just Refl <- same b b' = Just Refl
-same TNat _ = Nothing
-same TFun{} _ = Nothing
-same TSum{} _ = Nothing
-same TPair{} _ = Nothing
+same Nat Nat = Just Refl
+same (Fun a b) (Fun a' b') | Just Refl <- same a a', Just Refl <- same b b' = Just Refl
+same (Sum a b) (Sum a' b') | Just Refl <- same a a', Just Refl <- same b b' = Just Refl
+same (Pair a b) (Pair a' b') | Just Refl <- same a a', Just Refl <- same b b' = Just Refl
+same Nat _ = Nothing
+same Fun{} _ = Nothing
+same Sum{} _ = Nothing
+same Pair{} _ = Nothing
 
 -- Environments bind vars to vals
 data Binding where Bind :: Var a -> Val a -> Binding
@@ -85,10 +85,10 @@ eval env (EFix x@(xtp, xname) body) = result
 -- The rope trick.
 -- NB. DO NOT FORCE THUNKS! NO PATTERN MATCHING!
 delay :: Type a -> Val a -> Val a
-delay TNat        = (0 :)
-delay (TPair a b) = \x -> (delay a (fst x), delay b (snd x))
-delay (TFun a b)  = (delay b .)
-delay TSum{}      = Later
+delay Nat        = (0 :)
+delay (Pair a b) = \x -> (delay a (fst x), delay b (snd x))
+delay (Fun a b)  = (delay b .)
+delay Sum{}      = Later
 
 -- Eventual is, like, the initial Delay-algebra or something?
 -- a monad-but-stronger-elimination rule, like Set elimination in Datafun
@@ -98,10 +98,10 @@ eventually tp f (Later x) = delay tp (eventually tp f x)
 
 -- Type-indexed operations.
 lub :: Semilattice a -> [Val a] -> Val a
-lub TNat xss = maximum (0 : map head xss) : lub TNat (map tail xss)
-lub (TFun a b) fs = \x -> lub b [f x | f <- fs]
-lub (TPair a b) xys = (lub a (map fst xys), lub b (map snd xys))
-lub (TSum a b) xs = foldr combine infty xs
+lub Nat xss = maximum (0 : map head xss) : lub Nat (map tail xss)
+lub (Fun a b) fs = \x -> lub b [f x | f <- fs]
+lub (Pair a b) xys = (lub a (map fst xys), lub b (map snd xys))
+lub (Sum a b) xs = foldr combine infty xs
   where infty = Later infty
         combine (Later x) (Later y) = Later $ combine x y
         combine x@Later{} y@Now{} = combine y x -- always put Now first
@@ -124,25 +124,25 @@ ex n e = take n $ eval [] e
 
 -- defining the bottom stream recursively works
 simple :: Expr Int
-simple = EFix x (EVar x) where x = (TNat, "x")
+simple = EFix x (EVar x) where x = (Nat, "x")
 
 -- defining the bottom function recursively works, remarkably!
 dumb = EApp (EFix f (EVar f)) (ENat 0)
-  where f = (TFun TNat TNat, "f")
+  where f = (Fun Nat Nat, "f")
 
 plusOne :: Expr (Int -> Int)
 plusOne = EVal (map (+1))
 
 -- Stream of ever-increasing naturals: x = x + 1. Works.
 omega :: Expr Int
-omega = EFix x (EApp plusOne (EVar x)) where x = (TNat, "x")
+omega = EFix x (EApp plusOne (EVar x)) where x = (Nat, "x")
 
 -- A step on the way: f x = 1 + f x
 omega2 :: Expr Int
 omega2 = EApp (EFix f $ ELam x $ EApp plusOne $ EApp (EVar f) (EVar x))
               (ENat 0)
-  where f = (TFun TNat TNat, "f")
-        x = (TNat, "x")
+  where f = (Fun Nat Nat, "f")
+        x = (Nat, "x")
 
 at :: Int -> Expr (Int -> a) -> Expr a
 at n = flip EApp (ENat n)
@@ -152,8 +152,8 @@ at n = flip EApp (ENat n)
 funjoin :: Expr Int
 funjoin = at 3 $ EFix f $ ELub ftp [ ELam x (EApp ef (EApp plusOne ex))
                                    , ELam x (ENat 4) ]
-  where ftp = TFun TNat TNat
-        f = (ftp, "f"); x = (TNat, "x")
+  where ftp = Fun Nat Nat
+        f = (ftp, "f"); x = (Nat, "x")
         ef = EVar f; ex = EVar x
 
 sumjoin :: Expr Int
