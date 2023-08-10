@@ -1,17 +1,23 @@
-{-# LANGUAGE GADTs, TypeFamilies, ScopedTypeVariables #-}
+{-# LANGUAGE GADTs #-}
+type Stream a = [a] -- monotonically increasing infinite streams
+data Eventual a = Now a | Later (Eventual a) deriving (Show, Functor)
+
+type TNat = Stream Int
+type TSum a b = Eventual (Either a b)
+
 data Type a where
-  Nat :: Type Int
-  Sum :: Type a -> Type b -> Type (Either a b)
+  Nat  :: Type TNat
+  Sum  :: Type a -> Type b -> Type (TSum a b)
   Pair :: Type a -> Type b -> Type (a, b)
-  Fun :: Type a -> Type b -> Type (a -> b)
+  Fun  :: Type a -> Type b -> Type (a -> b)
 
 type Semilattice a = Type a -- for now all types are semilattices
 
 -- Expressions.
 type Var a = (Type a, String)
 data Expr a where
-  EVal :: Val a -> Expr a -- escape hatch for primitives
-  ENat :: Int -> Expr Int
+  EVal :: a -> Expr a -- escape hatch for primitives
+  ENat :: Int -> Expr TNat
   -- variables & functions
   EVar :: Var a -> Expr a
   ELam :: Var a -> Expr b -> Expr (a -> b)
@@ -21,21 +27,11 @@ data Expr a where
   EPi1 :: Expr (a,b) -> Expr a
   EPi2 :: Expr (a,b) -> Expr b
   -- sums
-  EInj :: Either (Expr a) (Expr b) -> Expr (Either a b)
-  ECase :: Type c -> Expr (Either a b) -> (Var a, Expr c) -> (Var b, Expr c) -> Expr c
+  EInj :: Either (Expr a) (Expr b) -> Expr (TSum a b)
+  ECase :: Type c -> Expr (TSum a b) -> (Var a, Expr c) -> (Var b, Expr c) -> Expr c
   -- semilattices & fixed points
   ELub :: Semilattice a -> [Expr a] -> Expr a
   EFix :: Var a -> Expr a -> Expr a
-
--- Values
-type Stream a = [a] -- monotonically increasing infinite streams
-data Eventual a = Now a | Later (Eventual a) deriving (Show, Functor)
-
-type family Val a where
-  Val Int = Stream Int
-  Val (Either a b) = Eventual (Either (Val a) (Val b))
-  Val (a, b) = (Val a, Val b)
-  Val (a -> b) = Val a -> Val b
 
 -- Are two types the same?
 data Same a b where Refl :: Same a a
@@ -50,9 +46,9 @@ same Sum{} _ = Nothing
 same Pair{} _ = Nothing
 
 -- Environments bind vars to vals
-data Binding where Bind :: Var a -> Val a -> Binding
+data Binding where Bind :: Var a -> a -> Binding
 type Env = [Binding]
-binding :: Var a -> Env -> Val a
+binding :: Var a -> Env -> a
 binding (xtp, xname) ys = search ys
   where search [] = error ("unbound variable: " ++ xname)
         search (Bind (ytp, yname) val : ys)
@@ -60,7 +56,7 @@ binding (xtp, xname) ys = search ys
           | xname == yname = error ("variable shadowed with different type: " ++ xname)
           | otherwise = search ys
 
-eval :: Env -> Expr a -> Val a
+eval :: Env -> Expr a -> a
 eval env (EVal v) = v
 eval env (ENat x) = xs where xs = x : xs
 eval env (EVar x) = binding x env
@@ -84,7 +80,7 @@ eval env (EFix x@(xtp, xname) body) = result
 
 -- The rope trick.
 -- NB. DO NOT FORCE THUNKS! NO PATTERN MATCHING!
-delay :: Type a -> Val a -> Val a
+delay :: Type a -> a -> a
 delay Nat        = (0 :)
 delay (Pair a b) = \x -> (delay a (fst x), delay b (snd x))
 delay (Fun a b)  = (delay b .)
@@ -92,12 +88,12 @@ delay Sum{}      = Later
 
 -- Eventual is, like, the initial Delay-algebra or something?
 -- a monad-but-stronger-elimination rule, like Set elimination in Datafun
-eventually :: Type b -> (a -> Val b) -> Eventual a -> Val b
+eventually :: Type b -> (a -> b) -> Eventual a -> b
 eventually tp f (Now x)   = f x
 eventually tp f (Later x) = delay tp (eventually tp f x)
 
 -- Type-indexed operations.
-lub :: Semilattice a -> [Val a] -> Val a
+lub :: Semilattice a -> [a] -> a
 lub Nat xss = maximum (0 : map head xss) : lub Nat (map tail xss)
 lub (Fun a b) fs = \x -> lub b [f x | f <- fs]
 lub (Pair a b) xys = (lub a (map fst xys), lub b (map snd xys))
@@ -115,7 +111,7 @@ lub (Sum a b) xs = foldr combine infty xs
 
 -- BUT WHAT DOES IT __DO__???
 
-ex :: Int -> Expr Int -> [Int]
+ex :: Int -> Expr TNat -> [Int]
 ex n e = take n $ eval [] e
 
 -- TODO:
@@ -123,40 +119,40 @@ ex n e = take n $ eval [] e
 -- f rght = {x+1 for x in f left}
 
 -- defining the bottom stream recursively works
-simple :: Expr Int
+simple :: Expr TNat
 simple = EFix x (EVar x) where x = (Nat, "x")
 
 -- defining the bottom function recursively works, remarkably!
 dumb = EApp (EFix f (EVar f)) (ENat 0)
   where f = (Fun Nat Nat, "f")
 
-plusOne :: Expr (Int -> Int)
+plusOne :: Expr (TNat -> TNat)
 plusOne = EVal (map (+1))
 
 -- Stream of ever-increasing naturals: x = x + 1. Works.
-omega :: Expr Int
+omega :: Expr TNat
 omega = EFix x (EApp plusOne (EVar x)) where x = (Nat, "x")
 
 -- A step on the way: f x = 1 + f x
-omega2 :: Expr Int
+omega2 :: Expr TNat
 omega2 = EApp (EFix f $ ELam x $ EApp plusOne $ EApp (EVar f) (EVar x))
               (ENat 0)
   where f = (Fun Nat Nat, "f")
         x = (Nat, "x")
 
-at :: Int -> Expr (Int -> a) -> Expr a
+at :: Int -> Expr (TNat -> a) -> Expr a
 at n = flip EApp (ENat n)
 
 -- Tests for ELub (TODO: at sum type)
 -- f = (\x -> f (x + 1)) join (\x -> 4)
-funjoin :: Expr Int
+funjoin :: Expr TNat
 funjoin = at 3 $ EFix f $ ELub ftp [ ELam x (EApp ef (EApp plusOne ex))
                                    , ELam x (ENat 4) ]
   where ftp = Fun Nat Nat
         f = (ftp, "f"); x = (Nat, "x")
         ef = EVar f; ex = EVar x
 
-sumjoin :: Expr Int
+sumjoin :: Expr TNat
 sumjoin = undefined
 
 -- TODO: tests for pair types
