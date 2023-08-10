@@ -103,22 +103,14 @@ lub (TFun a b) fs = \x -> lub b [f x | f <- fs]
 lub (TPair a b) xys = (lub a (map fst xys), lub b (map snd xys))
 lub (TSum a b) xs = foldr combine infty xs
   where infty = Later infty
-        combine (Now (Left x))  (Now (Left y))  = Now . Left  $ lub a [x, y]
-        combine (Now (Right x)) (Now (Right y)) = Now . Right $ lub b [x, y]
-        combine Now{} Now{} = error "Left/Right conflict"
         combine (Later x) (Later y) = Later $ combine x y
-        -- For Later x/Now y combination, we must lub the eventual result of x with y, and
-        -- in particular detect Left/Right collisions. But we cannot do this _immediately_
-        -- or risk non-productivity. So we use `delay`. Fingers crossed.
-        combine (Later x) (Now y) =
-          Now $ case y of
-                     Left z  -> Left  $ lub a [z, delay a (eventually a fromLeft x)]
-                     Right z -> Right $ lub b [z, delay b (eventually b fromRight x)]
+        combine x@Later{} y@Now{} = combine y x -- always put Now first
+        combine (Now (Left x)) y = Now . Left $ lub a [x, delay a (eventually a fromLeft y)]
           where fromLeft  (Left  q) = q
                 fromLeft  (Right _) = error "Left/Right conflict"
-                fromRight (Right q) = q
-                fromRight (Left  _) = error "Left/Right conflict"
-        combine x@Now{} y@Later{} = combine y x
+        combine (Now (Right x)) y = Now . Right $ lub b [x, delay b (eventually b fromRight y)]
+          where fromRight (Right q) = q
+                fromRight (Left  _) = error "Right/Left conflict"
 
 
 -- BUT WHAT DOES IT __DO__???
