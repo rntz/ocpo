@@ -29,7 +29,7 @@ data Expr a where
 
 -- Values
 type Stream a = [a] -- monotonically increasing infinite streams
-data Eventual a = Now a | Later (Eventual a) deriving (Show)
+data Eventual a = Now a | Later (Eventual a) deriving (Show, Functor)
 
 type family Val a where
   Val Int = Stream Int
