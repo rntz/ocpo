@@ -41,5 +41,5 @@ eval env (EFix x@(xtp, xname) body) = result
   where result = eval (Bind x (delay xtp result) : env) body
 
 delay :: Type a -> a -> a
-delay Nat xs = 0 : xs
-delay (Fun a b) f = \x -> delay b (f x)
+delay Nat = (0 :)
+delay (Fun a b) = (delay b .)
