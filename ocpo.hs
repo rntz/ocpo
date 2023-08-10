@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies #-}
+{-# LANGUAGE GADTs, TypeFamilies, ScopedTypeVariables #-}
 data Type a where
   TNat :: Type Int
   TSum :: Type a -> Type b -> Type (Either a b)
