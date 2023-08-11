@@ -198,5 +198,35 @@ funjoin = at 3 $ EFix f $ ELub ftp [ ELam x (EApp ef (EApp plusOne ex))
 sumjoin :: Expr Nat
 sumjoin = undefined
 
+-- Evens & odds.
+-- evenOdd (Left _)  = {0} lub {x + 1 for x in f (Right _)}
+-- evenOdd (Right _) = {x + 1 for x in f (Left _)}
+evenOdd :: Expr (Sum Nat Nat -> Set Nat)
+evenOdd = EFix f $ ELam arg $ ECase (Set Nat) (EVar arg) (irr, case1) (irr, case2)
+  where
+    case1, case2, comp1 :: Expr (Set Nat)
+    case1 = ELub (Set Nat) [ESet [ENat 0], comp1]
+    comp1 = EFor (Set Nat)
+                 (ef (EInj (Right (EVar irr))))
+                 (x, ESet [EApp plusOne (EVar x)])
+    case2 = EFor (Set Nat)
+                 (ef (EInj (Left (EVar irr))))
+                 (x, ESet [EApp plusOne (EVar x)])
+    f = (Fun (Sum Nat Nat) (Set Nat), "f"); ef = EApp (EVar f)
+    arg = (Sum Nat Nat, "arg")
+    irr = (Nat, "irrelevant")
+    x = (Nat, "x")
+
+evens :: Expr (Set Nat)
+evens = EApp evenOdd (EInj (Left (ENat 17)))
+
+odds :: Expr (Set Nat)
+odds = EApp evenOdd (EInj (Right (ENat 17)))
+
+-- EXTREMELY SLOW. Don't take more than ~300 elements from this list.
+nats :: Expr Nat
+nats = EFor Nat (ELub (Set Nat) [evens, odds]) (x, EVar x)
+  where x = (Nat, "x")
+
 -- TODO: tests for pair types
 -- TODO: tests for sum types
