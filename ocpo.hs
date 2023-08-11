@@ -114,6 +114,9 @@ eval env (ELub tp es) = lub tp $ map (eval env) es
 eval env (EFix x@(xtp, xname) body) = result
   where result = eval (Bind x (delay xtp result) : env) body
 
+
+-- TYPE-INDEXED OPERATIONS --
+
 -- The rope trick.
 -- NB. DO NOT FORCE THUNKS! NO PATTERN MATCHING!
 delay :: Type a -> a -> a
@@ -130,7 +133,6 @@ eventually :: Type b -> (a -> b) -> Eventual a -> b
 eventually tp f (Now x)   = f x
 eventually tp f (Later x) = delay tp (eventually tp f x)
 
--- Type-indexed operations.
 lub :: Semilattice a -> [a] -> a
 lub Nat xss   = map (maximum . (0:)) $ transpose xss
 lub Boole xs = loop [] xs
@@ -152,7 +154,7 @@ lub (Sum a b) xs = foldr combine never xs
                 fromRight (Left  _) = error "Right/Left conflict"
 
 
--- BUT WHAT DOES IT __DO__???
+-- BUT WHAT DOES IT __DO__??? (AKA examples/tests)
 
 ex :: Int -> Expr Nat -> [Int]
 ex n e = take n $ eval [] e
